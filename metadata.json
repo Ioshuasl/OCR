@@ -1,0 +1,7 @@
+{
+  "name": "Orius Scanner",
+  "description": "Uma aplicação para digitalizar documentos de identidade usando IA. Envie uma imagem de um documento de identidade (como RG ou CPF do Brasil), e a aplicação irá extrair informações chave como nome, nome dos pais, data de nascimento e números dos documentos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
