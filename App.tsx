@@ -1,30 +1,45 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import FileUpload from './components/FileUpload';
 import DocumentForm from './components/DocumentForm';
 import Spinner from './components/Spinner';
 import CameraScanner from './components/CameraScanner';
-import { extractDataFromImage } from './services/geminiService';
-import type { DocumentData } from './types';
+// Importa as novas funções e o novo tipo
+import { identifyDocumentType, extractDataFromImage } from './services/geminiService';
+import type { AllDocumentData } from './types'; 
 import { CameraIcon, CheckCircleIcon, ExclamationTriangleIcon } from './components/icons';
 
 const App: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [extractedData, setExtractedData] = useState<DocumentData | null>(null);
+  
+  // O estado de dados agora usa o novo tipo de união
+  const [extractedData, setExtractedData] = useState<AllDocumentData | null>(null);
+  
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Adiciona um estado para a mensagem de loading
+  const [loadingMessage, setLoadingMessage] = useState<string>("Analisando..."); 
+  
   const [error, setError] = useState<string | null>(null);
   const [scanComplete, setScanComplete] = useState<boolean>(false);
   const [isCameraOpen, setIsCameraOpen] = useState<boolean>(false);
 
+  useEffect(() => {
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
+
   const handleFileChange = (file: File) => {
     setImageFile(file);
-    setImageUrl(URL.createObjectURL(file));
     setExtractedData(null);
     setError(null);
     setScanComplete(false);
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    setImageUrl(file.type.startsWith('image/') ? URL.createObjectURL(file) : null);
   };
   
   const resetState = () => {
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
     setImageFile(null);
     setImageUrl(null);
     setExtractedData(null);
@@ -33,6 +48,17 @@ const App: React.FC = () => {
     setIsLoading(false);
   };
 
+  // Converte arquivo para Base64
+  const getBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = (error) => reject(new Error("Erro ao ler o arquivo."));
+    });
+  };
+
+  // --- LÓGICA DE ANÁLISE REATORADA (2 CHAMADAS) ---
   const handleScan = useCallback(async () => {
     if (!imageFile) return;
 
@@ -41,31 +67,36 @@ const App: React.FC = () => {
     setScanComplete(false);
 
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(imageFile);
-      reader.onloadend = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        if (base64String) {
-          const data = await extractDataFromImage(base64String, imageFile.type);
-          setExtractedData(data);
-          setScanComplete(true);
-        } else {
-            throw new Error("Falha ao ler o arquivo de imagem.");
-        }
-      };
-      reader.onerror = () => {
-        throw new Error("Erro ao ler o arquivo.");
+      setLoadingMessage("Lendo arquivo...");
+      const base64String = await getBase64(imageFile);
+      if (!base64String) throw new Error("Falha ao ler o arquivo.");
+
+      // --- CHAMADA 1: IDENTIFICAR ---
+      setLoadingMessage("Identificando documento...");
+      const { tipoDocumento } = await identifyDocumentType(base64String, imageFile.type);
+
+      if (!tipoDocumento || tipoDocumento === 'DESCONHECIDO') {
+        throw new Error(`Não foi possível identificar o tipo do documento.`);
       }
+
+      // --- CHAMADA 2: EXTRAIR ---
+      setLoadingMessage(`Extraindo dados de ${tipoDocumento}...`);
+      const data = await extractDataFromImage(base64String, imageFile.type, tipoDocumento);
+
+      setExtractedData(data);
+      setScanComplete(true);
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Ocorreu um erro desconhecido.';
-      setError(`Falha ao extrair os dados. Por favor, tente outra imagem. Erro: ${errorMessage}`);
+      setError(`Falha na análise. Erro: ${errorMessage}`);
       console.error(err);
     } finally {
       setIsLoading(false);
+      setLoadingMessage("Analisando..."); // Reseta a mensagem
     }
-  }, [imageFile]);
+  }, [imageFile]); 
   
-  const handleDataUpdate = (updatedData: DocumentData) => {
+  const handleDataUpdate = (updatedData: AllDocumentData) => {
     setExtractedData(updatedData);
   };
   
@@ -84,13 +115,13 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex flex-col items-center p-4 sm:p-6 lg:p-8">
-      <div className="w-full max-w-4xl mx-auto">
+      <div className="w-full max-w-4xl mx_auto">
         <header className="text-center mb-8">
           <h1 className="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-teal-400">
             Orius Scanner
           </h1>
           <p className="mt-2 text-lg text-slate-600 dark:text-slate-400">
-            Envie um documento de identidade para extrair as informações automaticamente.
+            Envie qualquer documento (ID, Contrato, Ata) para análise.
           </p>
         </header>
 
@@ -100,6 +131,7 @@ const App: React.FC = () => {
               <FileUpload 
                 onFileChange={handleFileChange} 
                 imageUrl={imageUrl} 
+                imageFile={imageFile}
                 onCameraClick={() => setIsCameraOpen(true)}
               />
               
@@ -120,7 +152,7 @@ const App: React.FC = () => {
                     {isLoading ? (
                       <>
                         <Spinner />
-                        Analisando...
+                        {loadingMessage}
                       </>
                     ) : (
                       <>
@@ -139,6 +171,7 @@ const App: React.FC = () => {
                     <CheckCircleIcon className="h-6 w-6"/>
                     <h2 className="text-xl font-semibold">Extração Concluída</h2>
                  </div>
+                {/* O DocumentForm agora recebe o novo tipo de dado */}
                 <DocumentForm 
                     data={extractedData} 
                     onUpdate={handleDataUpdate} 
@@ -160,6 +193,7 @@ const App: React.FC = () => {
             <p>&copy; {new Date().getFullYear()} Orius Scanner. Criado com React & Gemini.</p>
         </footer>
       </div>
+      
       {isCameraOpen && (
         <CameraScanner
           onCapture={handleCapture}
