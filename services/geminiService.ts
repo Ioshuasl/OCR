@@ -207,3 +207,52 @@ export const extractDataFromImage = async (base64Image: string, mimeType: string
         throw new Error(`Falha ao extrair dados para ${docType}.`);
     }
 };
+
+// Um schema simples para forçar a IA a responder em um formato JSON
+const responseSchemaQnA = {
+    type: Type.OBJECT,
+    properties: {
+        resposta: { 
+            type: Type.STRING, 
+            description: "A resposta direta à pergunta do usuário, baseada no documento." 
+        },
+    },
+    required: ["resposta"],
+};
+
+/**
+ * Envia o documento e uma pergunta específica para a IA.
+ */
+export const askQuestionAboutDocument = async (
+    base64Image: string, 
+    mimeType: string, 
+    question: string
+): Promise<string> => {
+    
+    if (!question) {
+        throw new Error("A pergunta não pode estar vazia.");
+    }
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash', // Pode-se usar um modelo mais avançado (ex: Pro) para Q&A
+            contents: {
+                parts: [
+                    { inlineData: { data: base64Image, mimeType: mimeType } },
+                    { text: `Baseado estritamente no documento fornecido, responda a seguinte pergunta: "${question}"` },
+                ],
+            },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: responseSchemaQnA,
+            }
+        });
+        
+        const parsedData = JSON.parse(response.text.trim());
+        return parsedData.resposta || "Não foi possível encontrar uma resposta no documento.";
+
+    } catch (error) {
+        console.error("Error asking question:", error);
+        throw new Error("Falha ao perguntar ao documento. Tente novamente.");
+    }
+};

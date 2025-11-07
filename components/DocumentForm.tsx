@@ -1,6 +1,8 @@
-import React, { ChangeEvent } from 'react';
+import React, { ChangeEvent, useState } from 'react';
 // Importa o novo tipo de união e os tipos individuais
 import type { AllDocumentData, RgData, CnhData, EnderecoData, ProcuracaoData, EscrituraData, EstatutoData, AtaData } from '../types';
+import Spinner from './Spinner';
+import { askQuestionAboutDocument } from '@/services/geminiService';
 // --- COMPONENTE DE INPUT REUTILIZÁVEL ---
 // (Este LabeledInput que já tínhamos é perfeito)
 const LabeledInput: React.FC<{ label: string; name: string; value: string; onChange: (e: ChangeEvent<HTMLInputElement>) => void; }> = ({ label, name, value, onChange }) => (
@@ -175,15 +177,80 @@ const FormularioAta: React.FC<{ data: AtaData; onUpdate: (data: AllDocumentData)
     );
 };
 
+interface QnaBoxProps {
+    docBase64: string | null;
+    docMimeType: string | null;
+}
+
+const QnaBox: React.FC<QnaBoxProps> = ({ docBase64, docMimeType }) => {
+    const [question, setQuestion] = useState<string>("");
+    const [answer, setAnswer] = useState<string | null>(null);
+    const [isAsking, setIsAsking] = useState<boolean>(false);
+    const [qnaError, setQnaError] = useState<string | null>(null);
+
+    const handleAsk = async () => {
+        if (!docBase64 || !docMimeType || !question) return;
+
+        setIsAsking(true);
+        setQnaError(null);
+        setAnswer(null);
+
+        try {
+            const result = await askQuestionAboutDocument(docBase64, docMimeType, question);
+            setAnswer(result);
+        } catch (err) {
+            setQnaError(err instanceof Error ? err.message : "Erro desconhecido");
+        } finally {
+            setIsAsking(false);
+        }
+    };
+
+    return (
+        <div className="pt-6 mt-6 border-t border-slate-300 dark:border-slate-600">
+            <h4 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-3">
+                Pergunte ao Documento
+            </h4>
+            <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                        type="text"
+                        value={question}
+                        onChange={(e) => setQuestion(e.target.value)}
+                        placeholder="Ex: Qual o valor do capital social?"
+                        className="block w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    />
+                    <button
+                        onClick={handleAsk}
+                        disabled={isAsking || !question}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-slate-400 dark:disabled:bg-slate-600"
+                    >
+                        {isAsking ? <Spinner /> : "Perguntar"}
+                    </button>
+                </div>
+                {qnaError && (
+                    <p className="text-sm text-red-500">{qnaError}</p>
+                )}
+                {answer && (
+                    <div className="p-3 bg-slate-100 dark:bg-slate-900/50 rounded-lg">
+                        <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{answer}</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- COMPONENTE PRINCIPAL (ROTEADOR) ---
 
 interface DocumentFormProps {
   data: AllDocumentData;
   onUpdate: (updatedData: AllDocumentData) => void;
   imageUrl: string | null;
+  docBase64: string | null;
+  docMimeType: string | null;
 }
 
-const DocumentForm: React.FC<DocumentFormProps> = ({ data, onUpdate, imageUrl }) => {
+const DocumentForm: React.FC<DocumentFormProps> = ({ data, onUpdate, imageUrl, docBase64, docMimeType }) => {
     
   // A lógica de renderização agora é um switch
   const renderFormFields = () => {
@@ -240,6 +307,9 @@ const DocumentForm: React.FC<DocumentFormProps> = ({ data, onUpdate, imageUrl })
                 {/* Renderiza o formulário dinâmico aqui */}
                 {renderFormFields()}
             </form>
+
+            {/* --- NOVA SEÇÃO DE Q&A RENDERIZADA --- */}
+            <QnaBox docBase64={docBase64} docMimeType={docMimeType} />
         </div>
         
         {/* Lado da Imagem (permanece o mesmo) */}
